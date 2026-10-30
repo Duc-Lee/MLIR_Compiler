@@ -1,4 +1,5 @@
 #pragma once
+
 #include "mlir/Pass/Pass.h"
 #include <memory>
 
@@ -9,10 +10,10 @@ class FuncOp;
 
 namespace vision {
 
-// pass hop nhat toan tu: Conv2D + BatchNorm + ReLU/SiLU
+/// Creates an operation pass that fuses Conv2D/MatMul with bias addition and activation.
 std::unique_ptr<Pass> createVisionFusionPass();
 
-// dang ky pattern fusion vao rewrite set
+/// Populates rewrite patterns for operator fusion (GEMM/Conv epilogue fusion).
 void populateVisionFusionPatterns(RewritePatternSet &patterns);
 
 } // namespace vision

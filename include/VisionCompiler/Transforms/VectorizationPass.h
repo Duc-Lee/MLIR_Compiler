@@ -10,7 +10,7 @@ class FuncOp;
 
 namespace vision {
 
-// pass vectorize cac phep toan linalg sang vector dialect (AVX2/SIMD)
+/// Creates an operation pass that vectorizes Linalg operations into Vector Dialect ops.
 std::unique_ptr<Pass> createVisionVectorizationPass();
 std::unique_ptr<Pass> createVisionVectorizationPass(int64_t vectorWidth);
 

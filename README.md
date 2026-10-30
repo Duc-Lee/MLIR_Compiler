@@ -17,79 +17,101 @@ An end-to-end MLIR-based optimizing compiler pipeline for deep learning inferenc
 
 ## Requirements
 
-* Linux (Ubuntu 20.04/22.04 or WSL2)
+* Linux (Ubuntu 20.04 / 22.04 / 24.04 or WSL2)
 * CMake >= 3.20
 * GCC or Clang with C++17 support
-* LLVM / MLIR 18
-* Python 3 with PyTorch (for model export and reference verification)
+* LLVM / MLIR 18 (`llvm-18-dev`, `libmlir-18-dev`, `mlir-18-tools`)
+* Python >= 3.10 with PyTorch and NumPy
+
+### Python Setup & `torch-mlir` Installation
+
+The compiler uses PyTorch for model definition, graph tracing via `torch.fx`, and numeric verification. If you also need `torch-mlir` for dialect compilation and frontend lowering:
+
+```bash
+# 1. Create and activate a Python virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2. Install PyTorch and NumPy
+pip install --upgrade pip
+pip install torch numpy
+
+# 3. Install torch-mlir (official LLVM release wheels, supports Python 3.10 - 3.12)
+pip install --pre torch-mlir \
+  --extra-index-url https://download.pytorch.org/whl/nightly/cpu \
+  -f https://github.com/llvm/torch-mlir-release/releases/expanded_assets/dev-wheels
+```
+
+> **Note**: 
+> - If you run Ubuntu 24.04 (PEP 668), use the virtual environment above or specify `--break-system-packages` if installing globally.
+> - The old index (`llvm.github.io/torch-mlir/package-index`) is deprecated and only supports up to Python 3.11. Modern builds (including Python 3.12) are hosted directly at [llvm/torch-mlir-release](https://github.com/llvm/torch-mlir-release).
 
 ---
 
-## Build Instructions
+## Build
 
-```bash
-# Clone the repository
-git clone <repo-url>
-cd MLIR_Compiler
+### Automated Build
 
-# Build with CMake
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-```
-
-Alternatively, use the build script:
 ```bash
 ./scripts/build.sh
 ```
 
-Binaries will be available in `build/bin/`:
-* `vision-opt`: Compiler optimizer driver.
-* `vision-translate`: Translation tool to LLVM IR / C.
-* `bench_mlp`: Neural Network benchmark executable.
-* `bench_conv`: Conv2D benchmark executable.
+Flags supported:
+- `--clean`: Wipe build cache before compiling.
+- `--debug`: Compile with `-DCMAKE_BUILD_TYPE=Debug`.
+- `-j <N>`: Set build parallelism.
+
+### Manual CMake Build
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+```
+
+Outputs generated in `build/bin/`:
+| Target | Description |
+| :--- | :--- |
+| `vision-opt` | Custom optimizer driver (`--vision-fusion`, `--vision-tiling`, `--vision-vectorize`, `--vision-pipeline`) |
+| `vision-translate` | Translation utility emitting LLVM IR from MLIR modules |
+| `bench_mlp` | C benchmark harness evaluating Naive, Fused, Tiled, and AVX2 GEMM kernels |
+| `bench_conv` | C benchmark harness evaluating Conv2D AVX2 SIMD acceleration |
 
 ---
 
-## Usage
+## Workflow & Verification
 
-### 1. Run Compiler Passes
-
-Run individual passes or the complete lowering pipeline using `vision-opt`:
-
+### 1. Regression Test Suite
+Run the MLIR FileCheck regression suite:
 ```bash
-# Operator Fusion
-./build/bin/vision-opt --vision-fusion models/mlp.mlir
-
-# Loop Tiling (L1 Cache)
-./build/bin/vision-opt --vision-tiling models/mlp.mlir
-
-# Complete lowering pipeline to LLVM Dialect
-./build/bin/vision-opt --vision-pipeline models/mlp.mlir -o build/mlp_lowered.mlir
+./tests/run_tests.sh
 ```
 
-### 2. Run Test Suite
-
-Run all MLIR regression tests verified by LLVM `FileCheck`:
-
+### 2. End-to-End Pipeline & Numeric Verification
+Export PyTorch weights, trace model to MLIR, lower through `vision-opt`, and verify output against PyTorch ground truth:
 ```bash
-bash tests/run_tests.sh
-```
-
-### 3. End-to-End Compilation & PyTorch Verification
-
-Run the end-to-end driver to export weights, compile MLIR, and verify numerical precision against PyTorch:
-
-```bash
+# Multi-Layer Perceptron (MNIST: 784 -> 128 -> 64 -> 10)
 python3 models/compile_and_run_mlp.py
+
+# Conv2D + BatchNorm + ReLU Kernel
+python3 models/compile_and_run_model.py
 ```
 
-### 4. Run Benchmarks
-
-Measure latency across different optimization stages:
-
+### 3. Benchmarks & Profiling
+Measure execution latency and speedup across optimization passes:
 ```bash
 bash benchmarks/run_benchmarks.sh
+```
+
+### 4. Running Passes Standalone (`vision-opt`)
+```bash
+# Operator Fusion (GEMM + Bias + ReLU)
+./build/bin/vision-opt --vision-fusion models/mlp.mlir
+
+# Cache-aware Loop Tiling
+./build/bin/vision-opt --vision-tiling models/mlp.mlir
+
+# Complete lowering down to LLVM dialect
+./build/bin/vision-opt --vision-pipeline models/mlp.mlir -o build/mlp_lowered.mlir
 ```
 
 ---

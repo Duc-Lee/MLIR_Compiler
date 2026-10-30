@@ -1,6 +1,6 @@
 #include "VisionCompiler/Pipeline/VisionPipeline.h"
 #include "VisionCompiler/Transforms/Passes.h"
-
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
@@ -11,7 +11,6 @@
 #include "mlir/Conversion/TosaToTensor/TosaToTensor.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVMPass.h"
 #include "mlir/Conversion/VectorToSCF/VectorToSCF.h"
-#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Dialect/Bufferization/Pipelines/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
@@ -25,41 +24,41 @@ namespace mlir::vision {
 
 void buildVisionLoweringPipeline(OpPassManager &pm,
                                  const VisionPipelineOptions &options) {
-  // giai doan 1: ha tosa sang linalg on tensors neu input la tosa
+  // Phase 1: High-level TOSA dialect lowering to Linalg on tensors
   pm.addNestedPass<func::FuncOp>(tosa::createTosaToLinalgNamed());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaToLinalg());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaToTensor());
 
-  // lam sach cac phep toan va don gian hoa do thi
+  // Canonicalization and common subexpression elimination
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
 
-  // giai doan 2: pass 1 - operator fusion (conv + bias/bn + relu)
+  // Phase 2: Operator Fusion (Conv2D/MatMul + Bias/BN + ReLU)
   if (options.runFusion) {
     pm.addNestedPass<func::FuncOp>(createVisionFusionPass());
     pm.addPass(createCanonicalizerPass());
     pm.addPass(createCSEPass());
   }
 
-  // giai doan 3: bufferization (chuyen tensor bat bien sang memref vung nho thuc)
+  // Phase 3: One-shot bufferization (lowers immutable Tensors to allocated MemRefs)
   bufferization::OneShotBufferizationOptions bufOptions;
   bufOptions.bufferizeFunctionBoundaries = true;
   pm.addPass(bufferization::createOneShotBufferizePass(bufOptions));
 
-  // giai doan 4: pass 2 - loop tiling de toi uu L1/L2 cache tren buffers
+  // Phase 4: Loop Tiling for L1/L2 cache locality on memrefs
   if (options.runTiling) {
     pm.addNestedPass<func::FuncOp>(createVisionTilingPass(options.tilingConfig));
     pm.addPass(createCanonicalizerPass());
   }
 
-  // giai doan 5: pass 3 - vectorization xuong vector dialect (AVX2/SIMD)
+  // Phase 5: Vectorization down to Vector Dialect (AVX2 256-bit SIMD)
   if (options.runVectorization) {
     pm.addNestedPass<func::FuncOp>(createVisionVectorizationPass(
         options.hwConfig.vectorWidthBits / 32));
     pm.addPass(createCanonicalizerPass());
   }
 
-  // giai doan 6: ha cap xuong llvm ir neu duoc yeu cau
+  // Phase 6: Progressive lowering to LLVM Dialect
   if (options.lowerToLLVM) {
     pm.addPass(memref::createExpandStridedMetadataPass());
     pm.addNestedPass<func::FuncOp>(createConvertLinalgToLoopsPass());
@@ -78,7 +77,7 @@ void buildVisionLoweringPipeline(OpPassManager &pm,
 void registerVisionPipeline() {
   PassPipelineRegistration<>(
       "vision-pipeline",
-      "End-to-end lowering pipeline cho vision models voi Fusion, Tiling va Vectorization",
+      "End-to-end lowering pipeline for vision models with Fusion, Tiling, and Vectorization",
       [](OpPassManager &pm) {
         VisionPipelineOptions defaultOptions;
         buildVisionLoweringPipeline(pm, defaultOptions);

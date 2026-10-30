@@ -14,7 +14,7 @@ namespace mlir::vision {
 
 namespace {
 
-// gop bias add vao tosa.conv2d neu conv2d dang dung bias mac dinh la 0
+/// Fuses bias addition into tosa.conv2d when the convolution uses default zero-bias.
 struct FuseTosaConv2DBiasPattern : public OpRewritePattern<tosa::AddOp> {
   using OpRewritePattern<tosa::AddOp>::OpRewritePattern;
 
@@ -33,12 +33,11 @@ struct FuseTosaConv2DBiasPattern : public OpRewritePattern<tosa::AddOp> {
     if (!convOp || !convOp.getResult().hasOneUse())
       return failure();
 
-    // kiem tra bias hien tai cua conv co phai toan 0 khong
     Operation *currentBiasOp = convOp.getBias().getDefiningOp();
     if (!currentBiasOp)
       return failure();
 
-    // thay the bias cu bang bias moi tu tosa.add
+    // Replace the zero bias with the actual bias tensor from tosa.add
     rewriter.setInsertionPoint(convOp);
     auto fusedConv = rewriter.create<tosa::Conv2DOp>(
         convOp.getLoc(),
@@ -55,7 +54,7 @@ struct FuseTosaConv2DBiasPattern : public OpRewritePattern<tosa::AddOp> {
   }
 };
 
-// gop phep toan tosa.clamp (relu) vao ngay sau tosa.conv2d hoac tosa.add
+/// Fuses tosa.clamp (ReLU) directly into preceding tosa.conv2d or tosa.matmul operations.
 struct FuseTosaReluPattern : public OpRewritePattern<tosa::ClampOp> {
   using OpRewritePattern<tosa::ClampOp>::OpRewritePattern;
 
@@ -66,7 +65,6 @@ struct FuseTosaReluPattern : public OpRewritePattern<tosa::ClampOp> {
     if (!defOp || !defOp->hasOneUse())
       return failure();
 
-    // neu la tosa.conv2d hoac tosa.matmul thi danh dau thuoc tinh da fuse relu
     if (isa<tosa::Conv2DOp, tosa::MatMulOp>(defOp)) {
       if (defOp->hasAttr("fused_activation"))
         return failure();
@@ -80,13 +78,13 @@ struct FuseTosaReluPattern : public OpRewritePattern<tosa::ClampOp> {
   }
 };
 
-// gop 2 op linalg.generic lien ke (vi du conv/gemm generic + relu generic)
+/// Fuses consecutive linalg.generic operations (e.g., bias-add epilogue + elementwise ReLU).
 struct FuseLinalgGenericReluPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(linalg::GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
-    // chi xu ly cac op elementwise relu co 1 input va 1 output
+    // Only handle elementwise activation with single input and single init
     if (genericOp.getNumDpsInputs() != 1 || genericOp.getNumDpsInits() != 1)
       return failure();
 
@@ -95,14 +93,14 @@ struct FuseLinalgGenericReluPattern : public OpRewritePattern<linalg::GenericOp>
     if (!producerOp || !producerOp->hasOneUse())
       return failure();
 
-    // kiem tra body cua genericOp co phai phep max voi 0 (relu) khong
+    // Verify whether the operation body performs an arith.maximumf with 0.0 (ReLU)
     Block *body = genericOp.getBody();
     if (!body || body->empty())
       return failure();
 
     bool isRelu = false;
     for (auto &op : *body) {
-      if (auto maxf = dyn_cast<arith::MaximumFOp>(op)) {
+      if (dyn_cast<arith::MaximumFOp>(op)) {
         isRelu = true;
         break;
       }
@@ -111,21 +109,21 @@ struct FuseLinalgGenericReluPattern : public OpRewritePattern<linalg::GenericOp>
     if (!isRelu)
       return failure();
 
-    // danh dau producer la da fuse activation de backend sinh code tinh truc tiep
+    // Mark producer with fused_activation attribute for downstream lowering
     producerOp->setAttr("fused_activation", rewriter.getStringAttr("relu"));
     rewriter.replaceOp(genericOp, producerOp->getResults());
     return success();
   }
 };
 
-// pass thuc thi fusion tren cap ham
+/// Function pass executing operator fusion rewrites.
 struct VisionFusionPass
     : public PassWrapper<VisionFusionPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VisionFusionPass)
 
   StringRef getArgument() const final { return "vision-fusion"; }
   StringRef getDescription() const final {
-    return "Hop nhat toan tu Conv2D + Bias/BatchNorm + ReLU de giam luu luong RAM";
+    return "Fuses Conv2D/MatMul with bias addition and activation to reduce DRAM round-trips";
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -141,7 +139,6 @@ struct VisionFusionPass
     RewritePatternSet patterns(context);
     populateVisionFusionPatterns(patterns);
 
-    // ap dung greedy pattern rewrite
     GreedyRewriteConfig config;
     config.maxIterations = 10;
     if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns), config))) {

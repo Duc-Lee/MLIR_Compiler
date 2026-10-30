@@ -1,7 +1,3 @@
-// =========================================================================
-//  Auto-generated MLIR (Linalg Dialect) from PyTorch via torch.fx graph tracer
-// =========================================================================
-
 module {
   func.func @mlp_forward(
       %input: tensor<1x784xf32>,
@@ -11,15 +7,15 @@ module {
       %b2: tensor<1x64xf32>,
       %w3: tensor<64x10xf32>,
       %b3: tensor<1x10xf32>) -> tensor<1x10xf32> {
-
     %c0 = arith.constant 0.000000e+00 : f32
 
-    // Layer 1: fc1 (Linear 784 -> 128)
+    // Layer 1 Linear
     %init_l1 = tensor.empty() : tensor<1x128xf32>
     %fill_l1 = linalg.fill ins(%c0 : f32) outs(%init_l1 : tensor<1x128xf32>) -> tensor<1x128xf32>
     %mm1 = linalg.matmul
       ins(%input, %w1 : tensor<1x784xf32>, tensor<784x128xf32>)
       outs(%fill_l1 : tensor<1x128xf32>) -> tensor<1x128xf32>
+
     // Bias Add for Layer 1
     %bias_l1 = linalg.generic {
       indexing_maps = [
@@ -49,12 +45,13 @@ module {
       linalg.yield %act : f32
     } -> tensor<1x128xf32>
 
-    // Layer 2: fc2 (Linear 128 -> 64)
+    // Layer 2 Linear
     %init_l2 = tensor.empty() : tensor<1x64xf32>
     %fill_l2 = linalg.fill ins(%c0 : f32) outs(%init_l2 : tensor<1x64xf32>) -> tensor<1x64xf32>
     %mm2 = linalg.matmul
       ins(%relu_relu, %w2 : tensor<1x128xf32>, tensor<128x64xf32>)
       outs(%fill_l2 : tensor<1x64xf32>) -> tensor<1x64xf32>
+
     // Bias Add for Layer 2
     %bias_l2 = linalg.generic {
       indexing_maps = [
@@ -84,12 +81,13 @@ module {
       linalg.yield %act : f32
     } -> tensor<1x64xf32>
 
-    // Layer 3: fc3 (Linear 64 -> 10)
+    // Layer 3 Linear
     %init_l3 = tensor.empty() : tensor<1x10xf32>
     %fill_l3 = linalg.fill ins(%c0 : f32) outs(%init_l3 : tensor<1x10xf32>) -> tensor<1x10xf32>
     %mm3 = linalg.matmul
       ins(%relu_relu_1, %w3 : tensor<1x64xf32>, tensor<64x10xf32>)
       outs(%fill_l3 : tensor<1x10xf32>) -> tensor<1x10xf32>
+
     // Bias Add for Layer 3
     %bias_l3 = linalg.generic {
       indexing_maps = [

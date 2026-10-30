@@ -1,11 +1,11 @@
 #pragma once
 
-#include "mlir/Pass/PassManager.h"
 #include "VisionCompiler/Common/CompilerTypes.h"
+#include "mlir/Pass/PassManager.h"
 
 namespace mlir::vision {
 
-// tuy chon cho toan bo pipeline ha cap
+/// Configuration options for the complete Vision Lowering Pipeline.
 struct VisionPipelineOptions {
   TilingConfig tilingConfig;
   TargetHardwareConfig hwConfig;
@@ -16,11 +16,11 @@ struct VisionPipelineOptions {
   bool emitC = false;
 };
 
-// xay dung pipeline ha cap tu high-level IR (TOSA/Linalg) xuong LLVM / EmitC
+/// Builds the end-to-end progressive lowering pipeline from high-level dialects to LLVM.
 void buildVisionLoweringPipeline(OpPassManager &pm,
                                  const VisionPipelineOptions &options);
 
-// dang ky pipeline pipeline string voi MLIR PassManager
+/// Registers the "vision-pipeline" string name with the MLIR PassPipelineRegistry.
 void registerVisionPipeline();
 
 } // namespace mlir::vision

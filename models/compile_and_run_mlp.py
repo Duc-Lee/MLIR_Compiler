@@ -1,72 +1,67 @@
-"""
-Bien dich va xac minh toan dien mo hinh Neural Network (MNIST 3-Layer MLP)
-qua MLIR Compiler Pipeline.
-"""
+#!/usr/bin/env python3
+"""End-to-end compilation and execution driver for the PyTorch MLP model."""
 
-import os
+from __future__ import annotations
+
+import argparse
 import subprocess
 import sys
-import numpy as np
+from pathlib import Path
 
-def main():
-    print("===================================================================")
-    print("  Bien Dich Mo Hinh Neural Network MLP Qua MLIR Compiler Pipeline")
-    print("  Kien truc: 784 -> 128 (ReLU) -> 64 (ReLU) -> 10 (Logits)")
-    print("===================================================================")
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    opt_bin = os.path.join(root_dir, "build", "bin", "vision-opt")
-    mlp_py = os.path.join(root_dir, "models", "mlp.py")
-    mlp_mlir = os.path.join(root_dir, "models", "mlp.mlir")
-    bench_bin = os.path.join(root_dir, "build", "bin", "bench_mlp")
+def run_command(cmd: list[str], description: str) -> subprocess.CompletedProcess[str]:
+    """Executes a command and returns the completed process."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as err:
+        print(f"error: {description} failed (exit code {err.returncode})", file=sys.stderr)
+        if err.stderr:
+            print(err.stderr.strip(), file=sys.stderr)
+        sys.exit(err.returncode)
 
-    # Buoc 1: Sinh weights va file MLIR tu PyTorch
-    print("\n[1] Khoi tao PyTorch Model va sinh Ground Truth Reference...")
-    subprocess.run([sys.executable, mlp_py], check=True)
 
-    if not os.path.exists(opt_bin):
-        print(f"[!] Chua tim thay binary compiler: {opt_bin}")
-        print("    Vui long chay: ./scripts/build.sh")
-        return
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Compile and run MLP model through MLIR pipeline.")
+    parser.add_argument("--skip-bench", action="store_true", help="Skip running C benchmark binary.")
+    parser.add_argument("--skip-export", action="store_true", help="Skip PyTorch model and weight export.")
+    args = parser.parse_args()
 
-    # Buoc 2: Chay Pass 1 - Operator Fusion
-    print("\n[2] Thuc thi PASS 1: Operator Fusion (GEMM Epilogue Fusion)...")
-    cmd_pass1 = [opt_bin, "--vision-fusion", mlp_mlir]
-    res1 = subprocess.run(cmd_pass1, capture_output=True, text=True)
-    if res1.returncode == 0:
-        print("[+] PASS 1 (Fusion) thanh cong! Fused MatMul + Bias + ReLU.")
-    else:
-        print(f"[-] PASS 1 that bai: {res1.stderr}")
+    root_dir = Path(__file__).resolve().parent.parent
+    opt_bin = root_dir / "build" / "bin" / "vision-opt"
+    bench_bin = root_dir / "build" / "bin" / "bench_mlp"
+    mlp_py = root_dir / "models" / "mlp.py"
+    mlp_mlir = root_dir / "models" / "mlp.mlir"
+    build_dir = root_dir / "build"
+    lowered_mlir = build_dir / "mlp_lowered.mlir"
 
-    # Buoc 3: Chay Pass 2 - Loop Tiling
-    print("\n[3] Thuc thi PASS 2: Loop Tiling (L1 Cache Locality M, N, K)...")
-    cmd_pass2 = [opt_bin, "--vision-tiling", mlp_mlir]
-    res2 = subprocess.run(cmd_pass2, capture_output=True, text=True)
-    if res2.returncode == 0:
-        print("[+] PASS 2 (Tiling) thanh cong! Sinh ra cac scf.for blocks chia nho ma tran.")
-    else:
-        print(f"[-] PASS 2 that bai: {res2.stderr}")
+    if not args.skip_export:
+        subprocess.run([sys.executable, str(mlp_py)], check=True)
 
-    # Buoc 4: Chay End-to-End Lowering Pipeline
-    print("\n[4] Thuc thi End-to-End Pipeline (--vision-pipeline -> LLVM Dialect)...")
-    cmd_full = [opt_bin, "--vision-pipeline", mlp_mlir]
-    res_full = subprocess.run(cmd_full, capture_output=True, text=True)
-    if res_full.returncode == 0:
-        print("[+] Toan bo 3-Layer Neural Network da duoc ha cap thanh cong xuong LLVM Dialect!")
-        output_ir_path = os.path.join(root_dir, "build", "mlp_lowered.mlir")
-        with open(output_ir_path, "w") as f:
-            f.write(res_full.stdout)
-        num_lines = len(res_full.stdout.splitlines())
-        print(f"[+] Da xuat LLVM IR hoan chinh ({num_lines:,} dong) vao: {output_ir_path}")
-    else:
-        print(f"[-] Ha cap pipeline that bai: {res_full.stderr.strip()}")
+    if not opt_bin.exists():
+        print(f"error: compiler binary not found: {opt_bin}", file=sys.stderr)
+        print("hint: run ./scripts/build.sh to build the optimizer", file=sys.stderr)
+        sys.exit(1)
 
-    # Buoc 5: Chay benchmark do toc do va verify so hoc
-    print("\n[5] Chay Benchmark kiem tra do chinh xac so hoc va do latency...")
-    if os.path.exists(bench_bin):
-        subprocess.run([bench_bin])
-    else:
-        print(f"[!] Chua tim thay benchmark binary: {bench_bin}")
+    print(f"Compiling {mlp_mlir.name} through vision-opt:")
+    run_command([str(opt_bin), "--vision-fusion", str(mlp_mlir)], "vision-fusion")
+    print("  pass: vision-fusion (ok)")
+
+    run_command([str(opt_bin), "--vision-tiling", str(mlp_mlir)], "vision-tiling")
+    print("  pass: vision-tiling (ok)")
+
+    res_full = run_command([str(opt_bin), "--vision-pipeline", str(mlp_mlir)], "vision-pipeline")
+    build_dir.mkdir(parents=True, exist_ok=True)
+    lowered_mlir.write_text(res_full.stdout, encoding="utf-8")
+    num_lines = len(res_full.stdout.splitlines())
+    print(f"  pass: vision-pipeline -> {lowered_mlir.name} ({num_lines:,} lines)")
+
+    if not args.skip_bench:
+        print()
+        if bench_bin.exists():
+            subprocess.run([str(bench_bin)], check=True)
+        else:
+            print(f"warning: benchmark binary not found: {bench_bin}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

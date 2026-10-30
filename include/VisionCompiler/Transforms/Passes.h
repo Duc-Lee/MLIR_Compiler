@@ -1,11 +1,12 @@
 #pragma once
+
 #include "VisionCompiler/Transforms/FusionPass.h"
 #include "VisionCompiler/Transforms/TilingPass.h"
 #include "VisionCompiler/Transforms/VectorizationPass.h"
 
 namespace mlir::vision {
 
-// dang ky toan bo custom pass vao mlir pass registry
+/// Registers all VisionCompiler transformation passes with the MLIR PassRegistry.
 void registerVisionPasses();
 
 } // namespace mlir::vision

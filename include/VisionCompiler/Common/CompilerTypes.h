@@ -6,7 +6,7 @@
 
 namespace mlir::vision {
 
-// cau hinh tiling cho cac lop tinh toan conv2d va gemm
+/// Tiling dimensions for 2D convolution and GEMM operators.
 struct TilingConfig {
   int64_t tileM = 32;
   int64_t tileN = 32;
@@ -14,7 +14,7 @@ struct TilingConfig {
   bool enableVectorization = true;
 };
 
-// tap lenh muc tieu
+/// Target processor architecture / Instruction Set Architecture.
 enum class TargetISA {
   Generic,
   X86_AVX2,
@@ -22,12 +22,12 @@ enum class TargetISA {
   ARM_NEON
 };
 
-// thong so vector SIMD cho backend
+/// Hardware parameters for backend code generation and vectorization.
 struct TargetHardwareConfig {
   TargetISA isa = TargetISA::X86_AVX2;
-  int64_t vectorWidthBits = 256;      // 256-bit cho AVX2 (8 float32)
-  int64_t l1DataCacheBytes = 32768;   // 32KB L1 data cache pho bien
-  int64_t l2CacheBytes = 262144;      // 256KB-512KB L2
+  int64_t vectorWidthBits = 256;      // 256-bit registers for AVX2 (8 float32 elements)
+  int64_t l1DataCacheBytes = 32768;   // Typical 32 KB L1 data cache
+  int64_t l2CacheBytes = 262144;      // 256 KB L2 cache
 };
 
 } // namespace mlir::vision

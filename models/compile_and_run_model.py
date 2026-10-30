@@ -1,72 +1,67 @@
-import os
+#!/usr/bin/env python3
+"""End-to-end compilation and execution driver for Conv2D / Vision models."""
+
+from __future__ import annotations
+
+import argparse
 import subprocess
 import sys
-import torch
+from pathlib import Path
 
-def main():
-    print("===================================================================")
-    print("  Bien Dich Mo Hinh Deep Learning Qua MLIR Vision Compiler Pipeline")
-    print("===================================================================")
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    opt_bin = os.path.join(root_dir, "build", "bin", "vision-opt")
-    model_mlir = os.path.join(root_dir, "models", "conv_bn_relu.mlir")
-    resnet_mlir = os.path.join(root_dir, "models", "resnet_block.mlir")
+def run_command(cmd: list[str], description: str) -> subprocess.CompletedProcess[str]:
+    """Executes a command and returns the completed process."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as err:
+        print(f"error: {description} failed (exit code {err.returncode})", file=sys.stderr)
+        if err.stderr:
+            print(err.stderr.strip(), file=sys.stderr)
+        sys.exit(err.returncode)
 
-    if not os.path.exists(opt_bin):
-        print(f"[!] Chua tim thay binary compiler: {opt_bin}")
-        print("    Vui long chay: ./scripts/build.sh")
-        return
 
-    print(f"\n[1] File IR mo hinh dau vao:")
-    print(f"    - Subgraph Conv2D+Bias+ReLU: {model_mlir}")
-    print(f"    - ResNet-18 Residual Block : {resnet_mlir}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Compile and run Conv2D vision models through MLIR pipeline.")
+    parser.add_argument("--skip-bench", action="store_true", help="Skip running C benchmark binary.")
+    args = parser.parse_args()
 
-    # Buoc 1: Chay Pass 1 - Operator Fusion
-    print("\n[2] Thuc thi PASS 1: Operator Fusion...")
-    cmd_pass1 = [opt_bin, "--vision-fusion", model_mlir]
-    res1 = subprocess.run(cmd_pass1, capture_output=True, text=True)
-    if res1.returncode == 0:
-        print("[+] PASS 1 (Fusion) thanh cong!")
-    else:
-        print(f"[-] PASS 1 that bai: {res1.stderr}")
+    root_dir = Path(__file__).resolve().parent.parent
+    opt_bin = root_dir / "build" / "bin" / "vision-opt"
+    bench_bin = root_dir / "build" / "bin" / "bench_conv"
+    model_mlir = root_dir / "models" / "conv_bn_relu.mlir"
+    tiling_mlir = root_dir / "tests" / "test_tiling.mlir"
+    vectorize_mlir = root_dir / "tests" / "test_vectorize.mlir"
+    build_dir = root_dir / "build"
+    lowered_mlir = build_dir / "lowered_model.mlir"
 
-    # Buoc 2: Chay Pass 2 - Loop Tiling
-    print("\n[3] Thuc thi PASS 2: Loop Tiling (L1 Cache Locality)...")
-    cmd_pass2 = [opt_bin, "--vision-tiling", os.path.join(root_dir, "tests", "test_tiling.mlir")]
-    res2 = subprocess.run(cmd_pass2, capture_output=True, text=True)
-    if res2.returncode == 0:
-        print("[+] PASS 2 (Tiling) thanh cong! Sinh ra cac scf.for loop chia khoi.")
-    else:
-        print(f"[-] PASS 2 that bai: {res2.stderr}")
+    if not opt_bin.exists():
+        print(f"error: compiler binary not found: {opt_bin}", file=sys.stderr)
+        print("hint: run ./scripts/build.sh to build the optimizer", file=sys.stderr)
+        sys.exit(1)
 
-    # Buoc 3: Chay Pass 3 - Vectorization
-    print("\n[4] Thuc thi PASS 3: Vectorization (AVX2 / SIMD)...")
-    cmd_pass3 = [opt_bin, "--vision-vectorize", os.path.join(root_dir, "tests", "test_vectorize.mlir")]
-    res3 = subprocess.run(cmd_pass3, capture_output=True, text=True)
-    if res3.returncode == 0:
-        print("[+] PASS 3 (Vectorization) thanh cong! Sinh ra vector.transfer va arith.")
-    else:
-        print(f"[-] PASS 3 that bai: {res3.stderr}")
+    print(f"Compiling vision passes on {model_mlir.name}:")
+    run_command([str(opt_bin), "--vision-fusion", str(model_mlir)], "vision-fusion")
+    print("  pass: vision-fusion (ok)")
 
-    # Buoc 4: Chay End-to-End Pipeline
-    print("\n[5] Thuc thi End-to-End Lowering Pipeline (--vision-pipeline)...")
-    cmd_full = [opt_bin, "--vision-pipeline", model_mlir]
-    res_full = subprocess.run(cmd_full, capture_output=True, text=True)
-    if res_full.returncode == 0:
-        print("[+] Toan bo pipeline ha cap hoan tat!")
-        output_ir_path = os.path.join(root_dir, "build", "lowered_model.mlir")
-        with open(output_ir_path, "w") as f:
-            f.write(res_full.stdout)
-        print(f"[+] Da luu LLVM IR sau ha cap vao: {output_ir_path}")
-    else:
-        print(f"[i] Chi tiet ha cap: {res_full.stderr.strip() or 'OK'}")
+    run_command([str(opt_bin), "--vision-tiling", str(tiling_mlir)], "vision-tiling")
+    print("  pass: vision-tiling (ok)")
 
-    # Buoc 5: Chay benchmark do toc do thuc te tren CPU
-    print("\n[6] Kiem tra toc do thuc thi sau toi uu (AVX2 Kernel vs PyTorch Baseline)...")
-    bench_bin = os.path.join(root_dir, "build", "bin", "bench_conv")
-    if os.path.exists(bench_bin):
-        subprocess.run([bench_bin])
+    run_command([str(opt_bin), "--vision-vectorize", str(vectorize_mlir)], "vision-vectorize")
+    print("  pass: vision-vectorize (ok)")
+
+    res_full = run_command([str(opt_bin), "--vision-pipeline", str(model_mlir)], "vision-pipeline")
+    build_dir.mkdir(parents=True, exist_ok=True)
+    lowered_mlir.write_text(res_full.stdout, encoding="utf-8")
+    num_lines = len(res_full.stdout.splitlines())
+    print(f"  pass: vision-pipeline -> {lowered_mlir.name} ({num_lines:,} lines)")
+
+    if not args.skip_bench:
+        print()
+        if bench_bin.exists():
+            subprocess.run([str(bench_bin)], check=True)
+        else:
+            print(f"warning: benchmark binary not found: {bench_bin}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

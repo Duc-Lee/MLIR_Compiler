@@ -9,21 +9,34 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# uu tien tim kiem LLVM va MLIR tai .local neu he thong chua cai global
-list(PREPEND CMAKE_PREFIX_PATH
-  "/home/duc-le/.local/llvm-18/usr/lib/llvm-18"
+# Portable search paths for LLVM and MLIR packages
+if(DEFINED ENV{LLVM_DIR})
+  list(PREPEND CMAKE_PREFIX_PATH "$ENV{LLVM_DIR}")
+endif()
+if(DEFINED ENV{MLIR_DIR})
+  list(PREPEND CMAKE_PREFIX_PATH "$ENV{MLIR_DIR}")
+endif()
+if(DEFINED ENV{HOME})
+  list(APPEND CMAKE_PREFIX_PATH
+    "$ENV{HOME}/.local/llvm-18/usr/lib/llvm-18"
+    "$ENV{HOME}/.local/llvm-19/usr/lib/llvm-19"
+  )
+endif()
+list(APPEND CMAKE_PREFIX_PATH
   "/usr/lib/llvm-18"
+  "/usr/lib/llvm-19"
+  "/usr/local"
 )
 
-# them include goc cua du an
+# Project root include directory
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 find_package(MLIR CONFIG QUIET)
 find_package(LLVM CONFIG QUIET)
 
 if(MLIR_FOUND AND LLVM_FOUND)
-  message(STATUS "Da tim thay LLVM ${LLVM_PACKAGE_VERSION} tai: ${LLVM_DIR}")
-  message(STATUS "Da tim thay MLIR tai: ${MLIR_DIR}")
+  message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} at: ${LLVM_DIR}")
+  message(STATUS "Found MLIR at: ${MLIR_DIR}")
 
   list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
   list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
@@ -41,10 +54,11 @@ if(MLIR_FOUND AND LLVM_FOUND)
   add_subdirectory(lib)
   add_subdirectory(tools)
 else()
-  message(WARNING "Chua tim thay MLIR dev package tren may.")
-  message(STATUS "Huong dan cai dat tren Ubuntu/Debian: sudo apt install -y llvm-18-dev libmlir-18-dev mlir-18-tools clang-18")
-  message(STATUS "Van tiep tuc build runtime C va benchmark kernel AVX2...")
+  message(WARNING "MLIR development packages not found on system.")
+  message(STATUS "To install on Ubuntu/Debian: sudo apt install -y llvm-18-dev libmlir-18-dev mlir-18-tools clang-18")
+  message(STATUS "Continuing with runtime library and benchmark kernels...")
 endif()
 
-# luon build runtime va benchmarks
+# Always build runtime library and benchmark suites
 add_subdirectory(runtime)
+add_subdirectory(benchmarks)

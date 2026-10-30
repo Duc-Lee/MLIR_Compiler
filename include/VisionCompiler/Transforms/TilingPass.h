@@ -1,9 +1,8 @@
 #pragma once
 
-#include "mlir/Pass/Pass.h"
 #include "VisionCompiler/Common/CompilerTypes.h"
+#include "mlir/Pass/Pass.h"
 #include <memory>
-#include <vector>
 
 namespace mlir {
 namespace func {
@@ -12,7 +11,7 @@ class FuncOp;
 
 namespace vision {
 
-// pass chia nho vong lap (tiling) de vua khit L1/L2 cache
+/// Creates an operation pass that tiles Linalg operations for L1/L2 cache locality.
 std::unique_ptr<Pass> createVisionTilingPass();
 std::unique_ptr<Pass> createVisionTilingPass(const TilingConfig &config);
 

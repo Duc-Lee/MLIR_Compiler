@@ -4,17 +4,17 @@
 namespace mlir::vision {
 
 void registerVisionPasses() {
-  // dang ky pass 1: fusion
+  // Register Pass 1: Operator Fusion
   registerPass([]() -> std::unique_ptr<Pass> {
     return createVisionFusionPass();
   });
 
-  // dang ky pass 2: tiling
+  // Register Pass 2: Loop Tiling
   registerPass([]() -> std::unique_ptr<Pass> {
     return createVisionTilingPass();
   });
 
-  // dang ky pass 3: vectorization
+  // Register Pass 3: AVX2 Vectorization
   registerPass([]() -> std::unique_ptr<Pass> {
     return createVisionVectorizationPass();
   });

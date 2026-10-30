@@ -1,38 +1,43 @@
 #!/usr/bin/env bash
-set -e
+set -eo pipefail
 
-echo "============================================================"
-echo "  Thiet Lap Moi Truong Cho MLIR Vision Compiler Pipeline"
-echo "============================================================"
-
-# kiem tra he dieu hanh
-if [ -f /etc/os-release ]; then
+if [[ -f /etc/os-release ]]; then
   . /etc/os-release
-  echo "[+] Phat hien OS: $PRETTY_NAME"
+  echo "Host OS: ${PRETTY_NAME:-Linux}"
 fi
 
-echo ""
-echo "[1] Cai dat cac goi LLVM/MLIR 18 tren Ubuntu/Debian:"
-echo "    sudo apt update"
-echo "    sudo apt install -y llvm-18-dev libmlir-18-dev mlir-18-tools clang-18 ninja-build build-essential cmake"
-echo ""
+echo "Toolchain verification:"
+REQUIRED_TOOLS=(cmake gcc g++ clang-18 mlir-opt-18 FileCheck-18 python3)
+MISSING_TOOLS=()
 
-# kiem tra cac cong cu da co
-echo "[2] Kiem tra cac cong cu hien tai tren may:"
-for tool in cmake gcc clang-18 mlir-opt-18 python3; do
-  if command -v "$tool" >/dev/null 2>&1; then
-    echo "    - $tool: DA CO ($(command -v "$tool"))"
+for tool in "${REQUIRED_TOOLS[@]}"; do
+  if command -v "${tool}" >/dev/null 2>&1; then
+    printf "  %-16s : found (%s)\n" "${tool}" "$(command -v "${tool}")"
   else
-    echo "    - $tool: CHUA CO"
+    printf "  %-16s : missing\n" "${tool}"
+    MISSING_TOOLS+=("${tool}")
   fi
 done
 
+if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
+  echo ""
+  echo "To install missing system packages:"
+  echo "  sudo apt update"
+  echo "  sudo apt install -y llvm-18-dev libmlir-18-dev mlir-18-tools clang-18 build-essential cmake ninja-build"
+fi
+
 echo ""
-echo "[3] Cai dat thu vien Python cho frontend (PyTorch & torch-mlir):"
-echo "    python3 -m venv .venv"
-echo "    source .venv/bin/activate"
-echo "    pip install --upgrade pip"
-echo "    pip install torch torchvision"
-echo "    pip install --pre torch-mlir -f https://llvm.github.io/torch-mlir/package-index/"
-echo ""
-echo "[+] Hoan tat huong dan thiet lap moi truong."
+echo "Python environment:"
+if python3 -c "import torch, numpy" >/dev/null 2>&1; then
+  echo "  PyTorch $(python3 -c 'import torch; print(torch.__version__)') & NumPy $(python3 -c 'import numpy; print(numpy.__version__)') found"
+else
+  echo "  missing torch or numpy"
+  echo "  install via: pip install torch numpy"
+fi
+
+if python3 -c "import torch_mlir" >/dev/null 2>&1; then
+  echo "  torch-mlir $(python3 -c 'import torch_mlir; print(getattr(torch_mlir, \"__version__\", \"found\"))')"
+else
+  echo "  torch-mlir : not installed (optional)"
+  echo "  install via: pip install --pre torch-mlir -f https://github.com/llvm/torch-mlir-release/releases/expanded_assets/dev-wheels"
+fi

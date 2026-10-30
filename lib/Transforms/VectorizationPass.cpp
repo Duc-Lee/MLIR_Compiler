@@ -1,4 +1,5 @@
 #include "VisionCompiler/Transforms/VectorizationPass.h"
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
@@ -12,6 +13,7 @@ namespace mlir::vision {
 
 namespace {
 
+/// Operation pass that vectorizes structured Linalg operations into Vector Dialect ops.
 struct VisionVectorizationPass
     : public PassWrapper<VisionVectorizationPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VisionVectorizationPass)
@@ -21,7 +23,7 @@ struct VisionVectorizationPass
 
   StringRef getArgument() const final { return "vision-vectorize"; }
   StringRef getDescription() const final {
-    return "Vectorize cac toan tu Linalg thanh Vector Dialect de sinh ma AVX2 (256-bit)";
+    return "Vectorizes Linalg operations into Vector Dialect for AVX2 (256-bit SIMD)";
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -36,7 +38,7 @@ struct VisionVectorizationPass
     MLIRContext *context = &getContext();
     IRRewriter rewriter(context);
 
-    // duyet qua cac linalg op va thuc hien vectorize
+    // Collect Linalg operations to vectorize
     SmallVector<linalg::LinalgOp> linalgOps;
     func.walk([&](linalg::LinalgOp op) {
       linalgOps.push_back(op);
@@ -44,11 +46,10 @@ struct VisionVectorizationPass
 
     for (linalg::LinalgOp op : linalgOps) {
       rewriter.setInsertionPoint(op);
-      // goi vectorize cua linalg de ha thanh vector.transfer_read/write va vector.contract
       (void)linalg::vectorize(rewriter, op);
     }
 
-    // toi uu cac lenh vector vua sinh ra (vi du: rut gon transfer, can bang chuyen vi)
+    // Optimize resulting vector operations (drop unit dims, canonicalize transfer ops)
     RewritePatternSet patterns(context);
     vector::populateVectorTransferDropUnitDimsPatterns(patterns);
     vector::populateVectorReductionToContractPatterns(patterns);
@@ -56,8 +57,9 @@ struct VisionVectorizationPass
     config.maxIterations = 5;
     (void)applyPatternsAndFoldGreedily(func, std::move(patterns), config);
   }
+
 private:
-  int64_t vectorWidth = 8; // 8 phan tu float32 cho thanh ghi YMM 256-bit
+  int64_t vectorWidth = 8; // 8 x float32 elements per 256-bit YMM register
 };
 
 } // namespace

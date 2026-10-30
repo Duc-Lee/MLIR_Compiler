@@ -13,6 +13,7 @@ namespace mlir::vision {
 
 namespace {
 
+/// Operation pass that tiles structured Linalg operations using SCF loops.
 struct VisionTilingPass
     : public PassWrapper<VisionTilingPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VisionTilingPass)
@@ -22,7 +23,7 @@ struct VisionTilingPass
 
   StringRef getArgument() const final { return "vision-tiling"; }
   StringRef getDescription() const final {
-    return "Loop Tiling cho cac toan tu Linalg (Conv2D, GEMM) toi uu bo nho dem L1/L2";
+    return "Applies loop tiling to Linalg operators (Conv2D, GEMM) to fit L1/L2 cache";
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -36,10 +37,9 @@ struct VisionTilingPass
     MLIRContext *context = &getContext();
     IRRewriter rewriter(context);
 
-    // thu thap cac linalg op can duoc chia tile
+    // Collect candidate Linalg operations for loop tiling
     SmallVector<linalg::LinalgOp> candidateOps;
     func.walk([&](linalg::LinalgOp op) {
-      // tranh tile lai cac op da duoc tile
       if (op->hasAttr("tiled_by_vision"))
         return;
       candidateOps.push_back(op);
@@ -51,27 +51,25 @@ struct VisionTilingPass
       if (numLoops == 0)
         continue;
 
-      // tao tile size cho tung chieu vong lap
       SmallVector<OpFoldResult> tileSizes;
       tileSizes.reserve(numLoops);
 
-      // gan tile size tuy thuoc vao loai op
+      // Configure tile sizes according to operator semantics
       if (isa<linalg::MatmulOp>(op)) {
-        // matmul co 3 chieu [M, N, K]
+        // Matmul has 3 iteration dimensions: [M, N, K]
         tileSizes.push_back(rewriter.getIndexAttr(config.tileM));
         tileSizes.push_back(rewriter.getIndexAttr(config.tileN));
         tileSizes.push_back(rewriter.getIndexAttr(config.tileK));
       } else if (isa<linalg::Conv2DNhwcHwcfOp>(op)) {
-        // conv2d nhwc: [N=1, H=tileM, W=tileN, C_out=tileK, ...]
+        // Conv2D NHWC: [N=1, H=tileM, W=tileN, C_out=tileK, ...]
         tileSizes.push_back(rewriter.getIndexAttr(1));
         tileSizes.push_back(rewriter.getIndexAttr(config.tileM));
         tileSizes.push_back(rewriter.getIndexAttr(config.tileN));
         tileSizes.push_back(rewriter.getIndexAttr(config.tileK));
-        // cac chieu kernel giu nguyen (tile size = 0)
         while (tileSizes.size() < numLoops)
           tileSizes.push_back(rewriter.getIndexAttr(0));
       } else {
-        // linalg generic thong thuong: tile chieu ngoai cung
+        // Generic elementwise or reduce operations: tile outermost dimensions
         for (unsigned i = 0; i < numLoops; ++i) {
           if (i < 2)
             tileSizes.push_back(rewriter.getIndexAttr(config.tileM));
@@ -80,10 +78,10 @@ struct VisionTilingPass
         }
       }
 
-      // danh dau op da qua pass de tranh lap vo tan
+      // Mark operation to prevent recursive tiling
       op->setAttr("tiled_by_vision", rewriter.getBoolAttr(true));
 
-      // ap dung TilingInterface neu op ho tro
+      // Apply TilingUsingInterface
       if (auto tilingInterfaceOp = dyn_cast<TilingInterface>(op.getOperation())) {
         scf::SCFTilingOptions options;
         options.setTileSizes(tileSizes);
