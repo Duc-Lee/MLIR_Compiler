@@ -1,0 +1,13 @@
+build/
+bin/
+lib/*.a
+lib/*.so
+*.o
+*.so
+*.dylib
+.venv/
+.vscode/
+.cache/
+__pycache__/
+*.pyc
+.DS_Store
